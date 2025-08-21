@@ -1,0 +1,140 @@
+@using ChaosCraft.Models
+
+<div class="card">
+    <div class="card-header">
+        <h5><i class="oi oi-graph"></i> System Metrics (Simulated)</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-3">
+                <div class="metric-card bg-primary text-white p-3 rounded">
+                    <h6>Response Time</h6>
+                    <h3>@responseTime ms</h3>
+                    <small>Average over 5min</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-success text-white p-3 rounded">
+                    <h6>Success Rate</h6>
+                    <h3>@successRate%</h3>
+                    <small>Last 100 requests</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-warning text-white p-3 rounded">
+                    <h6>Error Rate</h6>
+                    <h3>@errorRate%</h3>
+                    <small>5xx errors</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-info text-white p-3 rounded">
+                    <h6>Throughput</h6>
+                    <h3>@throughput</h3>
+                    <small>req/sec</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <h6>Response Time Chart (Simulated)</h6>
+                <div class="chart-container bg-light p-3 rounded" style="height: 200px;">
+                    <canvas id="responseChart" style="width: 100%; height: 100%;"></canvas>
+                    <div class="text-center text-muted mt-3">
+                        <i class="oi oi-bar-chart"></i> Grafana-style visualization would appear here
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-3">
+            <div class="col-12">
+                <h6>Recent Events</h6>
+                <div class="events-log bg-light p-3 rounded" style="height: 150px; overflow-y: auto;">
+                    @foreach (var evt in events)
+                    {
+                        <div class="event-item d-flex justify-content-between">
+                            <span>@evt.Message</span>
+                            <small class="text-muted">@evt.Timestamp.ToString("HH:mm:ss")</small>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public ChaosTest? CurrentTest { get; set; }
+
+    private int responseTime = 245;
+    private decimal successRate = 98.5m;
+    private decimal errorRate = 1.5m;
+    private int throughput = 150;
+    private List<MetricEvent> events = new();
+    private Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        InitializeEvents();
+        timer = new Timer(UpdateMetrics, null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+    }
+
+    private void UpdateMetrics(object? state)
+    {
+        var random = new Random();
+        
+        if (CurrentTest?.Status == TestStatus.Running)
+        {
+            responseTime = CurrentTest.Template.DelayMs + random.Next(50, 200);
+            successRate = CurrentTest.Template.StatusCode >= 400 ? random.Next(60, 80) : random.Next(95, 99);
+            errorRate = 100 - (int)successRate;
+            throughput = random.Next(80, 120);
+            
+            AddEvent($"Chaos test active: {CurrentTest.Template.Name}");
+        }
+        else
+        {
+            responseTime = random.Next(180, 300);
+            successRate = random.Next(97, 100);
+            errorRate = 100 - (int)successRate;
+            throughput = random.Next(140, 180);
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void InitializeEvents()
+    {
+        events.AddRange(new[]
+        {
+            new MetricEvent("System started", DateTime.Now.AddMinutes(-10)),
+            new MetricEvent("Health check passed", DateTime.Now.AddMinutes(-5)),
+            new MetricEvent("Load balancer healthy", DateTime.Now.AddMinutes(-2))
+        });
+    }
+
+    private void AddEvent(string message)
+    {
+        events.Insert(0, new MetricEvent(message, DateTime.Now));
+        if (events.Count > 10) events.RemoveAt(events.Count - 1);
+    }
+
+    public void Dispose()
+    {
+        timer?.Dispose();
+    }
+
+    private class MetricEvent
+    {
+        public string Message { get; set; }
+        public DateTime Timestamp { get; set; }
+
+        public MetricEvent(string message, DateTime timestamp)
+        {
+            Message = message;
+            Timestamp = timestamp;
+        }
+    }
+}

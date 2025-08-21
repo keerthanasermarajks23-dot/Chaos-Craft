@@ -1,0 +1,338 @@
+@using ChaosCraft.Models
+@using ChaosCraft.Services
+@inject ChaosTestService TestService
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Configure Chaos Test</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Select API Endpoint</label>
+                        <select class="form-select" @bind="selectedEndpoint">
+                            <option value="">Choose endpoint...</option>
+                            @foreach (var endpoint in endpoints)
+                            {
+                                <option value="@endpoint">@endpoint</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Chaos Test Template</label>
+                        <div class="template-grid">
+                            @foreach (var template in templates)
+                            {
+                                <div class="template-card @(selectedTemplate?.Name == template.Name ? "selected" : "")" 
+                                     @onclick="() => SelectTemplate(template)">
+                                    <div class="template-header">
+                                        <strong>@template.Name</strong>
+                                        <span class="badge @GetStatusBadgeClass(template.StatusCode)">@template.StatusCode</span>
+                                    </div>
+                                    <div class="template-description">@template.Description</div>
+                                    @if (template.DelayMs > 0)
+                                    {
+                                        <div class="template-delay"><i class="oi oi-clock"></i> @template.DelayMs ms</div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-danger" @onclick="RunTest" disabled="@(!CanRunTest || isRunning)">
+                            @if (isRunning)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                <text>Running...</text>
+                            }
+                            else
+                            {
+                                <i class="oi oi-play-circle"></i>
+                                <text>Run Test</text>
+                            }
+                        </button>
+                        <button class="btn btn-info" @onclick="ExplainTest" disabled="@(selectedTemplate == null)">
+                            <i class="oi oi-question-mark"></i> Explain Test
+                        </button>
+                        @if (currentTest != null && currentTest.Status == TestStatus.Running)
+                        {
+                            <button class="btn btn-warning" @onclick="StopTest">
+                                <i class="oi oi-media-stop"></i> Stop Server
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Real-time Logs</h5>
+                </div>
+                <div class="card-body">
+                    <div class="log-container" style="height: 300px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: 'Courier New', monospace;">
+                        @if (logs.Any())
+                        {
+                            @foreach (var log in logs.TakeLast(50))
+                            {
+                                <div class="log-entry" style="margin-bottom: 2px; font-size: 0.85em;">
+                                    @log
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="text-muted">No logs yet... Start a test to see activity.</div>
+                        }
+                    </div>
+                    @if (currentTest != null)
+                    {
+                        <div class="mt-2">
+                            <small class="text-muted">Test URL: </small>
+                            <code>http://localhost:8080@currentTest.Endpoint</code>
+                            <button class="btn btn-sm btn-outline-secondary ms-2" @onclick="CopyUrl">
+                                <i class="oi oi-clipboard"></i>
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(explanation))
+            {
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6>AI Explanation</h6>
+                    </div>
+                    <div class="card-body">
+                        <p>@explanation</p>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (currentTest != null && currentTest.Status == TestStatus.Completed)
+    {
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <h5>Test Results</h5>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="ShowExportModal">
+                            <i class="oi oi-data-transfer-download"></i> Export Report
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>Endpoint:</strong> @currentTest.Endpoint
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Template:</strong> @currentTest.Template.Name
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Status:</strong> 
+                                <span class="badge bg-success">@currentTest.Status</span>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <h6>WireMock Configuration</h6>
+                            <pre class="bg-light p-2"><code>@wireMockConfig</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (showExportModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Export Format</h5>
+                    <button type="button" class="btn-close" @onclick="CloseExportModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Choose the format for your export:</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-primary" @onclick='() => ExportAs("pdf")'>
+                            <i class="oi oi-document"></i> PDF Document
+                        </button>
+                        <button class="btn btn-outline-success" @onclick='() => ExportAs("excel")'>
+                            <i class="oi oi-spreadsheet"></i> Excel Spreadsheet
+                        </button>
+                        <button class="btn btn-outline-info" @onclick='() => ExportAs("markdown")'>
+                            <i class="oi oi-text"></i> Markdown (.md)
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick='() => ExportAs("txt")'>
+                            <i class="oi oi-file"></i> Text File (.txt)
+                        </button>
+                        <button class="btn btn-outline-warning" @onclick='() => ExportAs("json")'>
+                            <i class="oi oi-code"></i> JSON Format
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseExportModal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<string> endpoints = new();
+    private List<ChaosTemplate> templates = new();
+    private string selectedEndpoint = string.Empty;
+    private ChaosTemplate? selectedTemplate;
+    private ChaosTest? currentTest;
+    private string explanation = string.Empty;
+    private string wireMockConfig = string.Empty;
+    private bool isRunning = false;
+    private bool showExportModal = false;
+    private List<string> logs = new();
+
+    protected override void OnInitialized()
+    {
+        endpoints = TestService.GetEndpoints();
+        templates = TestService.GetTemplates();
+        
+        TestService.LogAdded += OnLogAdded;
+        TestService.TestsUpdated += OnTestsUpdated;
+    }
+
+    private void OnLogAdded(string log)
+    {
+        logs.Add(log);
+        InvokeAsync(StateHasChanged);
+    }
+    
+    private void OnTestsUpdated()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private bool CanRunTest => !string.IsNullOrEmpty(selectedEndpoint) && selectedTemplate != null;
+
+    private void SelectTemplate(ChaosTemplate template)
+    {
+        selectedTemplate = template;
+        explanation = string.Empty;
+    }
+    
+    private string GetStatusBadgeClass(int statusCode)
+    {
+        return statusCode switch
+        {
+            >= 200 and < 300 => "bg-success",
+            >= 400 and < 500 => "bg-warning",
+            >= 500 => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+
+    private async Task RunTest()
+    {
+        if (selectedTemplate == null || string.IsNullOrEmpty(selectedEndpoint)) return;
+
+        isRunning = true;
+        logs.Clear();
+        
+        try
+        {
+            var testId = await TestService.RunTestAsync(selectedEndpoint, selectedTemplate);
+            currentTest = TestService.GetTest(testId);
+            wireMockConfig = TestService.GenerateWireMockConfig(selectedEndpoint, selectedTemplate);
+        }
+        finally
+        {
+            isRunning = false;
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void StopTest()
+    {
+        logs.Add($"[{DateTime.Now:HH:mm:ss}] Server stopped by user");
+        currentTest = null;
+        StateHasChanged();
+    }
+    
+    private async Task CopyUrl()
+    {
+        if (currentTest != null)
+        {
+            var url = $"http://localhost:8080{currentTest.Endpoint}";
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", url);
+        }
+    }
+
+    private void ExplainTest()
+    {
+        if (selectedTemplate == null || string.IsNullOrEmpty(selectedEndpoint)) return;
+        
+        explanation = TestService.ExplainTest(selectedTemplate, selectedEndpoint);
+    }
+
+    private void ShowExportModal()
+    {
+        showExportModal = true;
+    }
+    
+    private void CloseExportModal()
+    {
+        showExportModal = false;
+    }
+    
+    private async Task ExportAs(string format)
+    {
+        if (currentTest == null) return;
+        
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var baseName = $"chaos-test-{currentTest.Id}";
+        
+        switch (format.ToLower())
+        {
+            case "pdf":
+                var html = $@"<!DOCTYPE html><html><head><title>Chaos Test Report</title></head><body><h1>{currentTest.Name}</h1><p><strong>Endpoint:</strong> {currentTest.Endpoint}</p><p><strong>Status:</strong> {currentTest.Status}</p><p><strong>Template:</strong> {currentTest.Template.Name}</p></body></html>";
+                await JSRuntime.InvokeVoidAsync("downloadFile", $"{baseName}-{timestamp}.html", html, "text/html");
+                break;
+            case "excel":
+                var excel = $"Test Name\tEndpoint\tStatus\tTemplate\n{currentTest.Name}\t{currentTest.Endpoint}\t{currentTest.Status}\t{currentTest.Template.Name}";
+                await JSRuntime.InvokeVoidAsync("downloadFile", $"{baseName}-{timestamp}.xls", excel, "application/vnd.ms-excel");
+                break;
+            case "markdown":
+                var report = TestService.GenerateMarkdownReport(currentTest);
+                await JSRuntime.InvokeVoidAsync("downloadFile", $"{baseName}-{timestamp}.md", report, "text/markdown");
+                break;
+            case "txt":
+                var text = $"Test: {currentTest.Name}\nEndpoint: {currentTest.Endpoint}\nStatus: {currentTest.Status}\nTemplate: {currentTest.Template.Name}\nCreated: {currentTest.CreatedAt}\n\nLogs:\n{string.Join("\n", currentTest.Logs)}";
+                await JSRuntime.InvokeVoidAsync("downloadFile", $"{baseName}-{timestamp}.txt", text, "text/plain");
+                break;
+            case "json":
+                var json = System.Text.Json.JsonSerializer.Serialize(currentTest, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                await JSRuntime.InvokeVoidAsync("downloadFile", $"{baseName}-{timestamp}.json", json, "application/json");
+                break;
+        }
+        
+        CloseExportModal();
+    }
+    
+    public void Dispose()
+    {
+        TestService.LogAdded -= OnLogAdded;
+        TestService.TestsUpdated -= OnTestsUpdated;
+    }
+}
