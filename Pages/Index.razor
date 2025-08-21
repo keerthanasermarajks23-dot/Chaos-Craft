@@ -1,0 +1,30 @@
+﻿@page "/"
+@using ChaosCraft.Components
+@using ChaosCraft.Services
+@inject ChaosTestService TestService
+
+<PageTitle>ChaosCraft - Chaos Testing Platform</PageTitle>
+
+<div class="hero-section bg-primary text-white p-4 mb-4 rounded">
+    <div class="container">
+        <h1><i class="oi oi-wrench"></i> ChaosCraft</h1>
+        <p class="lead">Visually create and run chaos tests on REST APIs using WireMock</p>
+    </div>
+</div>
+
+<ChaosTestRunner />
+
+<div class="mt-4">
+    <MetricsPanel CurrentTest="@currentTest" />
+</div>
+
+@code {
+    private ChaosCraft.Models.ChaosTest? currentTest;
+
+    protected override void OnInitialized()
+    {
+        // Get the most recent test if any
+        var tests = TestService.GetTests();
+        currentTest = tests.LastOrDefault();
+    }
+}

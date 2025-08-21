@@ -1,0 +1,232 @@
+@page "/templates"
+@using ChaosCraft.Models
+@using ChaosCraft.Services
+@inject ChaosTestService TestService
+
+<PageTitle>Chaos Templates - ChaosCraft</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="oi oi-wrench"></i> Chaos Test Templates</h2>
+    <button class="btn btn-primary" @onclick="ShowAddTemplate">
+        <i class="oi oi-plus"></i> Add Template
+    </button>
+</div>
+
+<div class="row">
+    @foreach (var template in templates)
+    {
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">@template.Name</h6>
+                    <span class="badge @GetStatusBadgeClass(template.StatusCode)">@template.StatusCode</span>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">@template.Description</p>
+                    
+                    <div class="template-details">
+                        @if (template.DelayMs > 0)
+                        {
+                            <div class="detail-item">
+                                <i class="oi oi-clock text-warning"></i>
+                                <span>@template.DelayMs ms delay</span>
+                            </div>
+                        }
+                        
+                        @if (template.Headers.Any())
+                        {
+                            <div class="detail-item">
+                                <i class="oi oi-list text-info"></i>
+                                <span>@template.Headers.Count custom headers</span>
+                            </div>
+                        }
+                        
+                        @if (template.IsMalformed)
+                        {
+                            <div class="detail-item">
+                                <i class="oi oi-warning text-danger"></i>
+                                <span>Malformed response</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="btn-group w-100">
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => ViewTemplate(template)">
+                            <i class="oi oi-eye"></i> View
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => EditTemplate(template)">
+                            <i class="oi oi-pencil"></i> Edit
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (showTemplateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(isEditing ? "Edit" : "View") Template</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (selectedTemplate != null)
+                    {
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Name</label>
+                                    <input class="form-control" @bind="selectedTemplate.Name" readonly="@(!isEditing)" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Status Code</label>
+                                    <input type="number" class="form-control" @bind="selectedTemplate.StatusCode" readonly="@(!isEditing)" />
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Delay (ms)</label>
+                                    <input type="number" class="form-control" @bind="selectedTemplate.DelayMs" readonly="@(!isEditing)" />
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Description</label>
+                                    <textarea class="form-control" rows="3" @bind="selectedTemplate.Description" readonly="@(!isEditing)"></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" @bind="selectedTemplate.IsMalformed" disabled="@(!isEditing)" />
+                                        <label class="form-check-label">Malformed Response</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Response Body</label>
+                            <textarea class="form-control" rows="4" @bind="selectedTemplate.ResponseBody" readonly="@(!isEditing)" style="font-family: monospace;"></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Headers</label>
+                            <div class="headers-container">
+                                @foreach (var header in selectedTemplate.Headers)
+                                {
+                                    <div class="input-group mb-2">
+                                        <input class="form-control" value="@header.Key" readonly />
+                                        <span class="input-group-text">:</span>
+                                        <input class="form-control" value="@header.Value" readonly />
+                                    </div>
+                                }
+                                @if (!selectedTemplate.Headers.Any())
+                                {
+                                    <div class="text-muted">No custom headers</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseModal">Close</button>
+                    @if (isEditing)
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="SaveTemplate">Save Changes</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .template-details {
+        margin-top: 15px;
+    }
+    
+    .detail-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 0.9em;
+    }
+    
+    .detail-item i {
+        margin-right: 8px;
+        width: 16px;
+    }
+    
+    .headers-container {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+</style>
+
+@code {
+    private List<ChaosTemplate> templates = new();
+    private bool showTemplateModal = false;
+    private bool isEditing = false;
+    private ChaosTemplate? selectedTemplate;
+
+    protected override void OnInitialized()
+    {
+        templates = TestService.GetTemplates();
+    }
+
+    private string GetStatusBadgeClass(int statusCode)
+    {
+        return statusCode switch
+        {
+            >= 200 and < 300 => "bg-success",
+            >= 400 and < 500 => "bg-warning",
+            >= 500 => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+
+    private void ViewTemplate(ChaosTemplate template)
+    {
+        selectedTemplate = template;
+        isEditing = false;
+        showTemplateModal = true;
+    }
+
+    private void EditTemplate(ChaosTemplate template)
+    {
+        selectedTemplate = new ChaosTemplate
+        {
+            Name = template.Name,
+            Description = template.Description,
+            StatusCode = template.StatusCode,
+            DelayMs = template.DelayMs,
+            ResponseBody = template.ResponseBody,
+            Headers = new Dictionary<string, string>(template.Headers),
+            IsMalformed = template.IsMalformed
+        };
+        isEditing = true;
+        showTemplateModal = true;
+    }
+
+    private void ShowAddTemplate()
+    {
+        selectedTemplate = new ChaosTemplate();
+        isEditing = true;
+        showTemplateModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showTemplateModal = false;
+        selectedTemplate = null;
+        isEditing = false;
+    }
+
+    private void SaveTemplate()
+    {
+        // In a real application, this would save to a database
+        CloseModal();
+    }
+}

@@ -1,0 +1,459 @@
+@page "/history"
+@using ChaosCraft.Models
+@using ChaosCraft.Services
+@inject ChaosTestService TestService
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Test History - ChaosCraft</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="oi oi-list"></i> Test History</h2>
+    <div>
+        <button class="btn btn-outline-secondary me-2" @onclick="RefreshTests">
+            <i class="oi oi-reload"></i> Refresh
+        </button>
+        <div class="btn-group">
+            <button class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="oi oi-data-transfer-download"></i> Export All
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" @onclick="() => ShowExportModal(null)"><i class="oi oi-document"></i> Choose Format</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+@if (!tests.Any())
+{
+    <div class="text-center py-5">
+        <i class="oi oi-info" style="font-size: 3rem; color: #6c757d;"></i>
+        <h4 class="mt-3 text-muted">No tests run yet</h4>
+        <p class="text-muted">Start by running your first chaos test from the main dashboard.</p>
+        <a href="/" class="btn btn-primary">
+            <i class="oi oi-home"></i> Go to Dashboard
+        </a>
+    </div>
+}
+else
+{
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Test Name</th>
+                                    <th>Endpoint</th>
+                                    <th>Template</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var test in tests.OrderByDescending(t => t.CreatedAt))
+                                {
+                                    <tr>
+                                        <td>
+                                            <strong>@test.Name</strong>
+                                            @if (!string.IsNullOrEmpty(test.Description))
+                                            {
+                                                <br><small class="text-muted">@test.Description</small>
+                                            }
+                                        </td>
+                                        <td>
+                                            <code>@test.Endpoint</code>
+                                        </td>
+                                        <td>
+                                            <span class="badge @GetStatusBadgeClass(test.Template.StatusCode)">
+                                                @test.Template.Name
+                                            </span>
+                                            @if (test.Template.DelayMs > 0)
+                                            {
+                                                <br><small class="text-muted"><i class="oi oi-clock"></i> @test.Template.DelayMs ms</small>
+                                            }
+                                        </td>
+                                        <td>
+                                            <span class="badge @GetTestStatusClass(test.Status)">
+                                                @test.Status
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span title="@test.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC">
+                                                @GetRelativeTime(test.CreatedAt)
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary" @onclick="() => ViewTest(test)">
+                                                    <i class="oi oi-eye"></i>
+                                                </button>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button class="btn btn-outline-success dropdown-toggle" data-bs-toggle="dropdown">
+                                                        <i class="oi oi-data-transfer-download"></i>
+                                                    </button>
+                                                    <ul class="dropdown-menu">
+                                                        <li><a class="dropdown-item" @onclick="() => ShowExportModal(test)">Choose Format</a></li>
+                                                    </ul>
+                                                </div>
+                                                <button class="btn btn-outline-danger" @onclick="() => DeleteTest(test)">
+                                                    <i class="oi oi-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Statistics -->
+    <div class="row mt-4">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-primary">@tests.Count</h3>
+                    <p class="card-text">Total Tests</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-success">@tests.Count(t => t.Status == TestStatus.Completed)</h3>
+                    <p class="card-text">Completed</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-warning">@tests.Count(t => t.Status == TestStatus.Running)</h3>
+                    <p class="card-text">Running</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h3 class="text-danger">@tests.Count(t => t.Status == TestStatus.Failed)</h3>
+                    <p class="card-text">Failed</p>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showTestModal && selectedTest != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Test Details: @selectedTest.Name</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Test Information</h6>
+                            <table class="table table-sm">
+                                <tr>
+                                    <td><strong>Endpoint:</strong></td>
+                                    <td><code>@selectedTest.Endpoint</code></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Template:</strong></td>
+                                    <td>@selectedTest.Template.Name</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Status Code:</strong></td>
+                                    <td><span class="badge @GetStatusBadgeClass(selectedTest.Template.StatusCode)">@selectedTest.Template.StatusCode</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Delay:</strong></td>
+                                    <td>@selectedTest.Template.DelayMs ms</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Status:</strong></td>
+                                    <td><span class="badge @GetTestStatusClass(selectedTest.Status)">@selectedTest.Status</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Created:</strong></td>
+                                    <td>@selectedTest.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Response Configuration</h6>
+                            <pre class="bg-light p-3" style="max-height: 200px; overflow-y: auto;"><code>@selectedTest.Template.ResponseBody</code></pre>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <h6>Test Logs</h6>
+                        <div class="log-container bg-light p-3" style="max-height: 300px; overflow-y: auto; font-family: monospace;">
+                            @if (selectedTest.Logs.Any())
+                            {
+                                @foreach (var log in selectedTest.Logs)
+                                {
+                                    <div>@log</div>
+                                }
+                            }
+                            else
+                            {
+                                <div class="text-muted">No logs available</div>
+                            }
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <h6>WireMock Configuration</h6>
+                        <pre class="bg-light p-3" style="max-height: 200px; overflow-y: auto;"><code>@TestService.GenerateWireMockConfig(selectedTest.Endpoint, selectedTest.Template)</code></pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseModal">Close</button>
+                    <button type="button" class="btn btn-primary" @onclick="() => ShowExportModal(selectedTest)">
+                        <i class="oi oi-data-transfer-download"></i> Export Report
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showExportModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Export Format</h5>
+                    <button type="button" class="btn-close" @onclick="CloseExportModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Choose the format for your export:</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-primary" @onclick='() => ExportAs("pdf")'>
+                            <i class="oi oi-document"></i> PDF Document
+                        </button>
+                        <button class="btn btn-outline-success" @onclick='() => ExportAs("excel")'>
+                            <i class="oi oi-spreadsheet"></i> Excel Spreadsheet
+                        </button>
+                        <button class="btn btn-outline-info" @onclick='() => ExportAs("markdown")'>
+                            <i class="oi oi-text"></i> Markdown (.md)
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick='() => ExportAs("txt")'>
+                            <i class="oi oi-file"></i> Text File (.txt)
+                        </button>
+                        <button class="btn btn-outline-warning" @onclick='() => ExportAs("json")'>
+                            <i class="oi oi-code"></i> JSON Format
+                        </button>
+                        <button class="btn btn-outline-dark" @onclick='() => ExportAs("csv")'>
+                            <i class="oi oi-list"></i> CSV File
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseExportModal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ChaosTest> tests = new();
+    private bool showTestModal = false;
+    private bool showExportModal = false;
+    private ChaosTest? selectedTest;
+    private ChaosTest? exportTest;
+
+    protected override void OnInitialized()
+    {
+        RefreshTests();
+    }
+
+    private void RefreshTests()
+    {
+        tests = TestService.GetTests();
+        StateHasChanged();
+    }
+
+    private string GetStatusBadgeClass(int statusCode)
+    {
+        return statusCode switch
+        {
+            >= 200 and < 300 => "bg-success",
+            >= 400 and < 500 => "bg-warning",
+            >= 500 => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+
+    private string GetTestStatusClass(TestStatus status)
+    {
+        return status switch
+        {
+            TestStatus.Completed => "bg-success",
+            TestStatus.Running => "bg-warning",
+            TestStatus.Failed => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+
+    private string GetRelativeTime(DateTime dateTime)
+    {
+        var timeSpan = DateTime.UtcNow - dateTime;
+        
+        if (timeSpan.TotalMinutes < 1)
+            return "Just now";
+        if (timeSpan.TotalMinutes < 60)
+            return $"{(int)timeSpan.TotalMinutes}m ago";
+        if (timeSpan.TotalHours < 24)
+            return $"{(int)timeSpan.TotalHours}h ago";
+        if (timeSpan.TotalDays < 7)
+            return $"{(int)timeSpan.TotalDays}d ago";
+        
+        return dateTime.ToString("MMM dd, yyyy");
+    }
+
+    private void ViewTest(ChaosTest test)
+    {
+        selectedTest = test;
+        showTestModal = true;
+    }
+
+    private void ShowExportModal(ChaosTest? test)
+    {
+        exportTest = test;
+        showExportModal = true;
+    }
+    
+    private void CloseExportModal()
+    {
+        showExportModal = false;
+        exportTest = null;
+    }
+    
+    private async Task ExportAs(string format)
+    {
+        var testsToExport = exportTest != null ? new[] { exportTest } : tests.ToArray();
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var baseName = exportTest != null ? $"chaos-test-{exportTest.Id}" : "chaos-tests-all";
+        
+        switch (format.ToLower())
+        {
+            case "pdf":
+                await ExportAsPdf(testsToExport, $"{baseName}-{timestamp}.pdf");
+                break;
+            case "excel":
+                await ExportAsExcel(testsToExport, $"{baseName}-{timestamp}.xlsx");
+                break;
+            case "markdown":
+                await ExportAsMarkdown(testsToExport, $"{baseName}-{timestamp}.md");
+                break;
+            case "txt":
+                await ExportAsText(testsToExport, $"{baseName}-{timestamp}.txt");
+                break;
+            case "json":
+                await ExportAsJson(testsToExport, $"{baseName}-{timestamp}.json");
+                break;
+            case "csv":
+                await ExportAsCsv(testsToExport, $"{baseName}-{timestamp}.csv");
+                break;
+        }
+        
+        CloseExportModal();
+    }
+    
+    private async Task ExportAsMarkdown(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        var content = string.Join("\n\n---\n\n", tests.Select(t => TestService.GenerateMarkdownReport(t)));
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, content, "text/markdown");
+    }
+    
+    private async Task ExportAsText(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        var content = string.Join("\n\n" + new string('=', 50) + "\n\n", tests.Select(t => 
+            $"Test: {t.Name}\n" +
+            $"Endpoint: {t.Endpoint}\n" +
+            $"Template: {t.Template.Name}\n" +
+            $"Status: {t.Status}\n" +
+            $"Created: {t.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC\n" +
+            $"Description: {t.Template.Description}\n\n" +
+            $"Logs:\n{string.Join("\n", t.Logs)}"));
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, content, "text/plain");
+    }
+    
+    private async Task ExportAsJson(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        var data = tests.Select(t => new {
+            t.Id, t.Name, t.Endpoint, t.Status, t.CreatedAt,
+            Template = t.Template.Name,
+            StatusCode = t.Template.StatusCode,
+            DelayMs = t.Template.DelayMs,
+            Description = t.Template.Description,
+            Logs = t.Logs
+        });
+        var content = System.Text.Json.JsonSerializer.Serialize(data, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, content, "application/json");
+    }
+    
+    private async Task ExportAsCsv(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        var csv = "Test Name,Endpoint,Template,Status Code,Status,Created,Description\n";
+        csv += string.Join("\n", tests.Select(t => 
+            $"\"{t.Name}\",\"{t.Endpoint}\",\"{t.Template.Name}\",{t.Template.StatusCode},\"{t.Status}\",\"{t.CreatedAt:yyyy-MM-dd HH:mm:ss}\",\"{t.Template.Description}\""));
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName, csv, "text/csv");
+    }
+    
+    private async Task ExportAsPdf(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        // For PDF, we'll generate HTML and let browser print to PDF
+        var html = $@"<!DOCTYPE html>
+<html><head><title>Chaos Test Report</title>
+<style>body{{font-family:Arial,sans-serif;margin:20px;}}table{{border-collapse:collapse;width:100%;}}th,td{{border:1px solid #ddd;padding:8px;text-align:left;}}th{{background-color:#f2f2f2;}}</style>
+</head><body>
+<h1>Chaos Test Report</h1>
+<table>
+<tr><th>Test Name</th><th>Endpoint</th><th>Template</th><th>Status</th><th>Created</th></tr>";
+        
+        foreach (var test in tests)
+        {
+            html += $"<tr><td>{test.Name}</td><td>{test.Endpoint}</td><td>{test.Template.Name}</td><td>{test.Status}</td><td>{test.CreatedAt:yyyy-MM-dd HH:mm:ss}</td></tr>";
+        }
+        
+        html += "</table></body></html>";
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName.Replace(".pdf", ".html"), html, "text/html");
+    }
+    
+    private async Task ExportAsExcel(IEnumerable<ChaosTest> tests, string fileName)
+    {
+        // For Excel, we'll generate a tab-separated file that Excel can open
+        var content = "Test Name\tEndpoint\tTemplate\tStatus Code\tStatus\tCreated\tDescription\n";
+        content += string.Join("\n", tests.Select(t => 
+            $"{t.Name}\t{t.Endpoint}\t{t.Template.Name}\t{t.Template.StatusCode}\t{t.Status}\t{t.CreatedAt:yyyy-MM-dd HH:mm:ss}\t{t.Template.Description}"));
+        await JSRuntime.InvokeVoidAsync("downloadFile", fileName.Replace(".xlsx", ".xls"), content, "application/vnd.ms-excel");
+    }
+
+    private void DeleteTest(ChaosTest test)
+    {
+        // In a real application, this would delete from database
+        // For now, we'll just refresh the list
+        RefreshTests();
+    }
+
+    private void CloseModal()
+    {
+        showTestModal = false;
+        selectedTest = null;
+    }
+}
